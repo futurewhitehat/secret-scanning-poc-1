@@ -37,15 +37,3 @@ COPY src/test/resources/alibabacreds.kdbx /var/helpers
 COPY src/test/resources/RSAprivatekey.pem /var/helpers
 COPY .ssh/ /home/wrongsecrets/.ssh/
 CMD java -Xms128m -Xmx128m -Xss512k -jar -Dserver.port=$PORT -XX:MaxRAMPercentage=75 -XX:MinRAMPercentage=25 -Dspring.profiles.active=without-vault -Dspringdoc.swagger-ui.enabled=${SPRINGDOC_UI} -Dspringdoc.api-docs.enabled=${SPRINGDOC_DOC} application.jar
-ENV slack_bot="xoxb-9228459186116-9224178209446-cnRAK5ms7Sz1Vmjbrybb4p0K"
-ENV git_token="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"
-ENV mongo_user="hopper"
-ENV mongo_pass="Appsec@123"
-ENV kibana_user="elastic"
-ENV kibana_password="SuperSecretPassword"
-ENV jenkins_user="jenkins_user"
-ENV jenkins_key="1234567890abcdef1234567890abcdef"
-ENV firebase_key="AIzaSyD-VSDVSFSFSD"
-ENV aws_key="AKIAIOSFODNNFEFRSD"
-ENV aws_secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-FAKE_API_KEY = "sk_test_4eC39HqLyjWDarjtT1zdp7dc"
