@@ -1,0 +1,80 @@
+name: Trufflehog Secret Scanning - By Siva
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  TruffleHog:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
+
+      - name: Run TruffleHog and Save Output
+        id: trufflehog
+        continue-on-error: true
+        run: |
+          trufflehog git file://. \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head HEAD \
+            --json > trufflehog_results.json || true
+
+      - name: Comment on PR with Findings (Formatted)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'trufflehog_results.json';
+
+            if (!fs.existsSync(path)) return;
+
+            const data = fs.readFileSync(path, 'utf8').trim();
+            if (!data) return;
+
+            const findings = data
+              .split('\n')
+              .map(line => JSON.parse(line))
+              .filter(entry => entry && entry.SourceMetadata);
+
+            if (findings.length === 0) return;
+
+            let markdown = `## 🔐 TruffleHog Secret Scan Results\n`;
+            markdown += `| File | Line | Detector | Redacted Secret |\n`;
+            markdown += `|------|------|----------|-----------------|\n`;
+
+            for (const finding of findings) {
+              const file = finding.SourceMetadata.Data || 'N/A';
+              const line = finding.SourceMetadata.LineNumber || 'N/A';
+              const reason = finding.DecodedReason || 'Unknown';
+              const redacted = finding.Redacted || '***';
+              markdown += `| \`${file}\` | ${line} | ${reason} | \`${redacted}\` |\n`;
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: markdown
+            });
+
+      - name: Fail if secrets are found
+        if: steps.trufflehog.outcome == 'failure'
+        run: exit 1
