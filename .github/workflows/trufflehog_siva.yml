@@ -25,7 +25,7 @@ jobs:
         run: |
               curl -sL https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest \
               | grep browser_download_url \
-              | grep linux-amd64 \
+              | grep linux_amd64 \
               | cut -d '"' -f 4 \
               | xargs curl -L -o trufflehog
               chmod +x trufflehog
