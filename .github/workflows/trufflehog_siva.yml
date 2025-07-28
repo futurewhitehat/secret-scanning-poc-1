@@ -1,75 +1,66 @@
-name: Trufflehog Secret Scanning - By Siva
+name: TruffleHog PR Scan - by Siva
 
 on:
   pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
   pull-requests: write
-  issues: write
 
 jobs:
   trufflehog:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Required for git history
+          fetch-depth: 0
 
-      - name: Install TruffleHog
-        run: pip install trufflehog
+      - name: Run TruffleHog GitHub Action
+        id: trufflehog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --json > trufflehog_results.json
 
-      - name: Get Base Commit
-        id: base
-        run: |
-          git fetch origin main
-          echo "BASE_COMMIT=$(git merge-base origin/main HEAD)" >> $GITHUB_ENV
-
-      - name: Run TruffleHog on PR Diff
-        id: scan
-        continue-on-error: true
-        run: |
-          trufflehog git \
-            --repo_path . \
-            --since_commit $BASE_COMMIT \
-            --json > trufflehog_results.json || true
-
-      - name: Comment on PR with Findings
+      - name: Comment on PR with TruffleHog results
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const path = 'trufflehog_results.json';
-            if (!fs.existsSync(path)) return;
 
-            const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
-            const findings = lines.map(line => JSON.parse(line)).filter(f => f && f.SourceMetadata);
-            if (findings.length === 0) return;
+            let body = '## 🔐 TruffleHog Secret Scan Results\n';
 
-            let markdown = `## 🔐 TruffleHog Secret Scan Results\n`;
-            markdown += `| File | Line | Detector | Redacted Secret |\n`;
-            markdown += `|------|------|----------|-----------------|\n`;
+            if (!fs.existsSync(path) || fs.readFileSync(path, 'utf8').trim() === '') {
+              body += `✅ No secrets found.\n`;
+            } else {
+              const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
+              const findings = lines.map(line => {
+                try { return JSON.parse(line); } catch { return null; }
+              }).filter(f => f && f.SourceMetadata);
 
-            for (const finding of findings) {
-              const file = finding.SourceMetadata.Data || 'N/A';
-              const line = finding.SourceMetadata.LineNumber || 'N/A';
-              const detector = finding.DecodedReason || 'Unknown';
-              const redacted = finding.Redacted || '***';
-              markdown += `| \`${file}\` | ${line} | ${detector} | \`${redacted}\` |\n`;
+              if (findings.length === 0) {
+                body += `✅ No secrets found.\n`;
+              } else {
+                body += `| File | Line | Detector | Redacted Secret |\n`;
+                body += `|------|------|----------|-----------------|\n`;
+                for (const f of findings) {
+                  const file = f.SourceMetadata?.Data || 'N/A';
+                  const line = f.SourceMetadata?.LineNumber || 'N/A';
+                  const detector = f.DecodedReason || 'Unknown';
+                  const redacted = f.Redacted || '***';
+                  body += `| \`${file}\` | ${line} | ${detector} | \`${redacted}\` |\n`;
+                }
+              }
             }
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: markdown
+              body: body
             });
-
-      - name: Fail if secrets found
-        if: steps.scan.outcome == 'failure'
-        run: exit 1
