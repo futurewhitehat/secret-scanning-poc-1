@@ -1,70 +1,48 @@
-name: TruffleHog PR Scan - By siva
+name: Secret Scan with TruffleHog - By Siva
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
   trufflehog:
-    name: TruffleHog Secret Scan
+    name: Scan for Secrets with TruffleHog
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Required for diff-based scanning
+          fetch-depth: 0  # Required for TruffleHog to see full history
 
-      - name: Install TruffleHog
-        run: |
-          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
-          chmod +x trufflehog
-          sudo mv trufflehog /usr/local/bin/
-
-      - name: Run TruffleHog on PR diff
+      - name: Run TruffleHog Scan
         id: trufflehog
-        run: |
-          git fetch origin ${{ github.base_ref }}
-          DIFF_RANGE="origin/${{ github.base_ref }}...HEAD"
-          echo "Scanning diff: $DIFF_RANGE"
-
-          # Save findings to file
-          trufflehog git --only-verified \
-            --diff $DIFF_RANGE \
-            --json > findings.json || true
-
-          # Parse and limit output
-          if [[ -s findings.json ]]; then
-            echo "Secrets found"
-            echo "true" > found_secrets.flag
-            head -c 65000 findings.json > short_findings.json
-          else
-            echo "No secrets found"
-          fi
-
-      - name: Comment findings on PR
-        if: success()
-        uses: actions/github-script@v7
+        uses: trufflesecurity/trufflehog@v3.74.0
         with:
-          script: |
-            const fs = require('fs');
-            if (fs.existsSync('found_secrets.flag')) {
-              const findings = fs.readFileSync('short_findings.json', 'utf8');
-              const body = `🚨 **TruffleHog found potential secrets in this PR**\n\n\`\`\`json\n${findings}\n\`\`\`\nPlease review and remove any sensitive data.`;
-              github.rest.issues.createComment({
-                issue_number: context.payload.pull_request.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            }
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
+          extra_args: --json --no-update-check
+        continue-on-error: true
 
-      - name: Fail if secrets found
-        if: success() && hashFiles('found_secrets.flag') != ''
+      - name: Upload TruffleHog Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog-results
+          path: trufflehog-results.json
+
+      - name: Fail if secrets detected
         run: |
-          echo "Secrets found in PR. Failing the workflow."
-          exit 1
+          if grep -q '"SourceMetadata"' trufflehog-results.json; then
+            echo "❌ Secrets detected by TruffleHog!"
+            exit 1
+          else
+            echo "✅ No secrets found."
+          fi
