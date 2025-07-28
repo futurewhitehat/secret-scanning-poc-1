@@ -29,7 +29,9 @@ jobs:
               | cut -d '"' -f 4 \
               | xargs curl -L -o trufflehog
               chmod +x trufflehog
-               sudo mv trufflehog /usr/local/bin/
+              sudo mv trufflehog /usr/local/bin/
+              uname -m
+              file trufflehog
 
       - name: Run TruffleHog Scan
         run: |
