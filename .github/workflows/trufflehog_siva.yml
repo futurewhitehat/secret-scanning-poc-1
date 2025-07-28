@@ -1,75 +1,70 @@
-name: Trufflehog Secret Scanning - By Siva
+name: TruffleHog PR Scan - By siva
 
 on:
   pull_request:
-    branches:
-      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
   pull-requests: write
-  issues: write
 
 jobs:
   trufflehog:
+    name: TruffleHog Secret Scan
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required for git history
+          fetch-depth: 0  # Required for diff-based scanning
 
       - name: Install TruffleHog
-        run: pip install trufflehog
-
-      - name: Get Base Commit
-        id: base
         run: |
-          git fetch origin main
-          echo "BASE_COMMIT=$(git merge-base origin/main HEAD)" >> $GITHUB_ENV
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
 
-      - name: Run TruffleHog on PR Diff
-        id: scan
-        continue-on-error: true
+      - name: Run TruffleHog on PR diff
+        id: trufflehog
         run: |
-          trufflehog git \
-            --repo_path . \
-            --since_commit $BASE_COMMIT \
-            --json > trufflehog_results.json || true
+          git fetch origin ${{ github.base_ref }}
+          DIFF_RANGE="origin/${{ github.base_ref }}...HEAD"
+          echo "Scanning diff: $DIFF_RANGE"
 
-      - name: Comment on PR with Findings
-        if: github.event_name == 'pull_request'
+          # Save findings to file
+          trufflehog git --only-verified \
+            --diff $DIFF_RANGE \
+            --json > findings.json || true
+
+          # Parse and limit output
+          if [[ -s findings.json ]]; then
+            echo "Secrets found"
+            echo "true" > found_secrets.flag
+            head -c 65000 findings.json > short_findings.json
+          else
+            echo "No secrets found"
+          fi
+
+      - name: Comment findings on PR
+        if: success()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = 'trufflehog_results.json';
-            if (!fs.existsSync(path)) return;
-
-            const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
-            const findings = lines.map(line => JSON.parse(line)).filter(f => f && f.SourceMetadata);
-            if (findings.length === 0) return;
-
-            let markdown = `## 🔐 TruffleHog Secret Scan Results\n`;
-            markdown += `| File | Line | Detector | Redacted Secret |\n`;
-            markdown += `|------|------|----------|-----------------|\n`;
-
-            for (const finding of findings) {
-              const file = finding.SourceMetadata.Data || 'N/A';
-              const line = finding.SourceMetadata.LineNumber || 'N/A';
-              const detector = finding.DecodedReason || 'Unknown';
-              const redacted = finding.Redacted || '***';
-              markdown += `| \`${file}\` | ${line} | ${detector} | \`${redacted}\` |\n`;
+            if (fs.existsSync('found_secrets.flag')) {
+              const findings = fs.readFileSync('short_findings.json', 'utf8');
+              const body = `🚨 **TruffleHog found potential secrets in this PR**\n\n\`\`\`json\n${findings}\n\`\`\`\nPlease review and remove any sensitive data.`;
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
             }
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: markdown
-            });
-
       - name: Fail if secrets found
-        if: steps.scan.outcome == 'failure'
-        run: exit 1
+        if: success() && hashFiles('found_secrets.flag') != ''
+        run: |
+          echo "Secrets found in PR. Failing the workflow."
+          exit 1
