@@ -1,10 +1,9 @@
 name: Trufflehog Secret Scanning - By Siva
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-  pull_request:
 
 permissions:
   contents: read
@@ -12,49 +11,44 @@ permissions:
   issues: write
 
 jobs:
-  TruffleHog:
+  trufflehog:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Required for git history
 
       - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+        run: pip install trufflehog
 
-      - name: Run TruffleHog and Save Output
-        id: trufflehog
+      - name: Get Base Commit
+        id: base
+        run: |
+          git fetch origin main
+          echo "BASE_COMMIT=$(git merge-base origin/main HEAD)" >> $GITHUB_ENV
+
+      - name: Run TruffleHog on PR Diff
+        id: scan
         continue-on-error: true
         run: |
-              BASE_COMMIT=$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)
-              trufflehog git . \
-              --branch HEAD \
-              --since_commit $BASE_COMMIT \
-              --json > trufflehog_results.json || true
+          trufflehog git \
+            --repo_path . \
+            --since_commit $BASE_COMMIT \
+            --json > trufflehog_results.json || true
 
-      - name: Comment on PR with Findings (Formatted)
+      - name: Comment on PR with Findings
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const path = 'trufflehog_results.json';
-
             if (!fs.existsSync(path)) return;
 
-            const data = fs.readFileSync(path, 'utf8').trim();
-            if (!data) return;
-
-            const findings = data
-              .split('\n')
-              .map(line => JSON.parse(line))
-              .filter(entry => entry && entry.SourceMetadata);
-
+            const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
+            const findings = lines.map(line => JSON.parse(line)).filter(f => f && f.SourceMetadata);
             if (findings.length === 0) return;
 
             let markdown = `## 🔐 TruffleHog Secret Scan Results\n`;
@@ -64,9 +58,9 @@ jobs:
             for (const finding of findings) {
               const file = finding.SourceMetadata.Data || 'N/A';
               const line = finding.SourceMetadata.LineNumber || 'N/A';
-              const reason = finding.DecodedReason || 'Unknown';
+              const detector = finding.DecodedReason || 'Unknown';
               const redacted = finding.Redacted || '***';
-              markdown += `| \`${file}\` | ${line} | ${reason} | \`${redacted}\` |\n`;
+              markdown += `| \`${file}\` | ${line} | ${detector} | \`${redacted}\` |\n`;
             }
 
             github.rest.issues.createComment({
@@ -76,6 +70,6 @@ jobs:
               body: markdown
             });
 
-      - name: Fail if secrets are found
-        if: steps.trufflehog.outcome == 'failure'
+      - name: Fail if secrets found
+        if: steps.scan.outcome == 'failure'
         run: exit 1
