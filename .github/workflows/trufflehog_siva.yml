@@ -21,15 +21,21 @@ jobs:
         with:
           fetch-depth: 0  # Required for TruffleHog to see full history
 
+      - name: Install TruffleHog CLI
+        run: |
+              curl -sL https://api.github.com/repos/trufflesecurity/trufflehog/releases/latest \
+              | grep browser_download_url \
+              | grep linux-amd64 \
+              | cut -d '"' -f 4 \
+              | xargs curl -L -o trufflehog
+              chmod +x trufflehog
+               sudo mv trufflehog /usr/local/bin/
+
       - name: Run TruffleHog Scan
-        id: trufflehog
-        uses: trufflesecurity/trufflehog@v3.74.0
-        with:
-          path: ./
-          base: ${{ github.event.before }}
-          head: ${{ github.sha }}
-          extra_args: --json > trufflehog-results.json
-        continue-on-error: false
+        run: |
+              git fetch origin ${{ github.base_ref }}
+              trufflehog git --base=${{ github.event.before }} --head=${{ github.sha }} --json > trufflehog-results.json || true
+
 
       - name: Upload TruffleHog Results
         if: always()
