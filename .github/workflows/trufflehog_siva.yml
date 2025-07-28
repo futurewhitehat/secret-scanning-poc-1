@@ -28,7 +28,7 @@ jobs:
           path: ./
           base: ${{ github.event.before }}
           head: ${{ github.sha }}
-          extra_args: --json --no-update
+          extra_args: --json
         continue-on-error: true
 
       - name: Upload TruffleHog Results
