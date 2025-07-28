@@ -37,7 +37,7 @@ jobs:
       - name: Run TruffleHog Scan
         run: |
               git fetch origin ${{ github.base_ref }}
-              trufflehog git --base=${{ github.event.before }} --head=${{ github.sha }} --json > trufflehog-results.json || true
+              trufflehog git --since-commit=${{ github.event.before }} --head=${{ github.sha }} --json > trufflehog-results.json || true
 
 
       - name: Upload TruffleHog Results
