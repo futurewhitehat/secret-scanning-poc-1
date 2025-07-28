@@ -31,10 +31,11 @@ jobs:
         id: trufflehog
         continue-on-error: true
         run: |
-          trufflehog git file://. \
-            --base "${{ github.event.repository.default_branch }}" \
-            --head HEAD \
-            --json > trufflehog_results.json || true
+              BASE_COMMIT=$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)
+              trufflehog git . \
+              --branch HEAD \
+              --since_commit $BASE_COMMIT \
+              --json > trufflehog_results.json || true
 
       - name: Comment on PR with Findings (Formatted)
         if: github.event_name == 'pull_request'
