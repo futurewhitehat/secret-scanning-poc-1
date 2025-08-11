@@ -50,7 +50,7 @@ jobs:
         with:
           base: ${{ inputs.base-ref }}
           head: ${{ inputs.head-ref }}
-          extra_args: --json --output trufflehog-results.json
+          extra_args: --json > trufflehog-results.json
         continue-on-error: true
 
       - name: Check if results file exists
