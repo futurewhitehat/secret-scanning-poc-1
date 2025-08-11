@@ -1,50 +1,85 @@
-      - name: Comment on PR if secrets detected
-        if: github.event_name == 'pull_request'
+name: TruffleHog Scan Reusable
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: 'Base branch for diff (only for PRs)'
+        required: false
+        type: string
+        default: 'main'
+      head-ref:
+        description: 'Head branch to scan'
+        required: false
+        type: string
+        default: 'HEAD'
+      is-pr:
+        description: 'Whether this is a pull request scan'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GH_TOKEN:
+        description: 'GitHub token for commenting'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  trufflehog-scan:
+    name: TruffleHog Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog v3.64.5
+        id: scan
+        uses: trufflesecurity/trufflehog@v3.64.5
+        with:
+          path: .
+          base: ${{ inputs.base-ref }}
+          head: ${{ inputs.head-ref }}
+          json: true
+        continue-on-error: true
+
+      - name: Save TruffleHog output to file
+        run: |
+          echo '${{ steps.scan.outputs.results }}' > trufflehog-results.json
+
+      - name: Check if secrets found
+        id: check
+        run: |
+          if [ -s trufflehog-results.json ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR if secrets found
+        if: steps.check.outputs.found == 'true' && inputs.is-pr
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = 'trufflehog-results.json';
+            const findings = fs.readFileSync('trufflehog-results.json', 'utf8');
+            const body = `🚨 **TruffleHog found potential secrets in this PR**\n\n\`\`\`json\n${findings.slice(0, 65000)}\n\`\`\``;
 
-            if (!fs.existsSync(path)) return;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
 
-            const lines = fs.readFileSync(path, 'utf8')
-              .split('\n')
-              .filter(Boolean)
-              .map(line => {
-                try {
-                  const finding = JSON.parse(line);
-                  const file = finding?.SourceMetadata?.Data?.Git?.file || 'unknown';
-                  const source = finding?.SourceName || 'unknown';
-                  const description = finding?.DetectorDescription || 'n/a';
-                  const raw = finding?.Raw || '';
-                  const rotation = finding?.ExtraData?.rotation_guide || 'N/A';
-
-                  return `- **File**: \`${file}\`\n  **Source**: ${source}\n  **Detector**: ${description}\n  **Secret**: \`${raw}\`\n  **Rotation Guide**: [Link](${rotation})`;
-                } catch (err) {
-                  return null;
-                }
-              })
-              .filter(Boolean);
-
-            if (lines.length > 0) {
-              const commentBody = [
-                '🚨 **TruffleHog found potential secrets in this PR**',
-                '',
-                ...lines,
-                '',
-                '> Please rotate and remove the exposed secrets.'
-              ].join('\n');
-
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: commentBody.slice(0, 65000) // GitHub API comment limit
-              });
-              
-              // Fail the workflow step when secrets are detected
-              core.setFailed('🚨 Secrets detected in PR. Please rotate and remove the exposed secrets before merging.');
-            } else {
-              console.log('✅ No verified secrets to report.');
-            }
+      - name: Fail if secrets found
+        if: steps.check.outputs.found == 'true'
+        run: |
+          echo "🚨 TruffleHog found secrets"
+          exit 1
