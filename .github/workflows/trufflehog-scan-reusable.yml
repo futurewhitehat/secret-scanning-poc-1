@@ -1,24 +1,26 @@
-name: Reusable TruffleHog PR Scan - By Siva
+name: TruffleHog Scan Reusable
 
 on:
   workflow_call:
     inputs:
       base-ref:
-        description: 'Base branch of the PR (e.g., main)'
-        required: true
+        description: 'Base branch for diff (only for PRs)'
+        required: false
         type: string
+        default: 'main'
       head-ref:
-        description: 'Head branch of the PR (e.g., feature branch)'
-        required: true
+        description: 'Head branch to scan'
+        required: false
         type: string
-      fail-on-secrets:
-        description: 'Whether to fail the workflow when secrets are found'
+        default: 'HEAD'
+      is-pr:
+        description: 'Whether this is a pull request scan'
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       GH_TOKEN:
-        description: 'GitHub token for commenting on PRs'
+        description: 'GitHub token for commenting'
         required: true
 
 permissions:
@@ -26,7 +28,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  trufflehog:
+  trufflehog-scan:
     name: TruffleHog Secret Scan
     runs-on: ubuntu-latest
 
@@ -36,52 +38,49 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install TruffleHog CLI
-        run: |
-          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
-          chmod +x trufflehog
-          sudo mv trufflehog /usr/local/bin/
+      - name: Run TruffleHog v3.64.5
+        id: scan
+        uses: trufflesecurity/trufflehog@v3.64.5
+        with:
+          path: .
+          base: ${{ inputs.base-ref }}
+          head: ${{ inputs.head-ref }}
+          json: true
+        continue-on-error: true
 
-      - name: Run TruffleHog on PR diff
-        id: run-trufflehog
+      - name: Save TruffleHog output to file
         run: |
-          git fetch origin ${{ inputs.base-ref }}
-          DIFF_RANGE="origin/${{ inputs.base-ref }}...${{ inputs.head-ref }}"
-          echo "Scanning diff: $DIFF_RANGE"
-          trufflehog git --only-verified \
-            --diff "$DIFF_RANGE" \
-            --json > findings.json || true
+          echo '${{ steps.scan.outputs.results }}' > trufflehog-results.json
 
-          if [[ -s findings.json ]]; then
-            echo "Secrets found"
-            echo "true" > found_secrets.flag
-            head -c 65000 findings.json > short_findings.json
+      - name: Check if secrets found
+        id: check
+        run: |
+          if [ -s trufflehog-results.json ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
           else
-            echo "No secrets found"
+            echo "found=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Comment findings on PR
-        if: success()
+      - name: Comment on PR if secrets found
+        if: steps.check.outputs.found == 'true' && inputs.is-pr
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = 'short_findings.json';
-            const flag = 'found_secrets.flag';
-            if (fs.existsSync(flag)) {
-              const findings = fs.readFileSync(path, 'utf8');
-              const body = `🚨 **TruffleHog found potential secrets in this PR**\n\n\`\`\`json\n${findings}\n\`\`\`\nPlease review and remove any sensitive data.`;
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: body
-              });
-            }
+            const findings = fs.readFileSync('trufflehog-results.json', 'utf8');
+            const body = `🚨 **TruffleHog found potential secrets in this PR**\n\n\`\`\`json\n${findings.slice(0, 65000)}\n\`\`\``;
 
-      - name: Fail if secrets found and fail-on-secrets is true
-        if: hashFiles('found_secrets.flag') != '' && inputs.fail-on-secrets == true
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Fail if secrets found
+        if: steps.check.outputs.found == 'true'
         run: |
-          echo "Secrets found in PR. Failing the workflow."
+          echo "🚨 TruffleHog found secrets"
           exit 1
+
