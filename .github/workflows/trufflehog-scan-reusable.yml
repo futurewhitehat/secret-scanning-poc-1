@@ -1,0 +1,190 @@
+name: TruffleHog Secret Scanning
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: 'Base branch to scan against (defaults to main)'
+        required: false
+        type: string
+        default: 'main'
+      head-ref:
+        description: 'Head branch to scan (defaults to current HEAD)'
+        required: false
+        type: string
+        default: 'HEAD'
+      fail-on-secrets:
+        description: 'Whether to fail the workflow when secrets are detected'
+        required: false
+        type: boolean
+        default: true
+      scan-depth:
+        description: 'Maximum depth of commits to scan'
+        required: false
+        type: string
+        default: '50'
+      config-path:
+        description: 'Path to TruffleHog config file (optional)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GITHUB_TOKEN:
+        description: 'GitHub token for commenting on PRs'
+        required: true
+
+jobs:
+  secret-scan:
+    name: Secret Scanning with TruffleHog
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ inputs.scan-depth }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          base: ${{ inputs.base-ref }}
+          head: ${{ inputs.head-ref }}
+          extra_args: --format json --output trufflehog-results.json
+        continue-on-error: true
+
+      - name: Check if results file exists
+        id: check-results
+        run: |
+          if [ -f "trufflehog-results.json" ]; then
+            echo "results-exist=true" >> $GITHUB_OUTPUT
+            echo "TruffleHog results file found"
+          else
+            echo "results-exist=false" >> $GITHUB_OUTPUT
+            echo "No TruffleHog results file found"
+          fi
+
+      - name: Comment on PR if secrets detected
+        if: steps.check-results.outputs.results-exist == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'trufflehog-results.json';
+
+            if (!fs.existsSync(path)) {
+              console.log('No TruffleHog results file found');
+              return;
+            }
+
+            const fileContent = fs.readFileSync(path, 'utf8').trim();
+            if (!fileContent) {
+              console.log('✅ No secrets detected - empty results file');
+              return;
+            }
+
+            const lines = fileContent
+              .split('\n')
+              .filter(Boolean)
+              .map(line => {
+                try {
+                  const finding = JSON.parse(line);
+                  const file = finding?.SourceMetadata?.Data?.Git?.file || 'unknown';
+                  const source = finding?.SourceName || 'unknown';
+                  const description = finding?.DetectorName || finding?.DetectorDescription || 'n/a';
+                  const raw = finding?.Raw || 'redacted';
+                  const verified = finding?.Verified ? '✅ Verified' : '⚠️ Unverified';
+                  const rotation = finding?.ExtraData?.rotation_guide || 'N/A';
+
+                  return `- **File**: \`${file}\`\n  **Detector**: ${description}\n  **Status**: ${verified}\n  **Secret**: \`${raw.substring(0, 50)}${raw.length > 50 ? '...' : ''}\`\n  **Rotation Guide**: ${rotation !== 'N/A' ? `[Link](${rotation})` : 'N/A'}`;
+                } catch (err) {
+                  console.error('Error parsing line:', err);
+                  return null;
+                }
+              })
+              .filter(Boolean);
+
+            if (lines.length > 0) {
+              const commentBody = [
+                '🚨 **TruffleHog found potential secrets in this PR**',
+                '',
+                `Found ${lines.length} potential secret${lines.length > 1 ? 's' : ''}:`,
+                '',
+                ...lines,
+                '',
+                '> ⚠️ **Action Required**: Please rotate and remove any exposed secrets before merging.',
+                '> 📋 **Next Steps**:',
+                '> 1. Rotate any verified secrets immediately',
+                '> 2. Remove secrets from your code and commit history',
+                '> 3. Use environment variables or secure secret management',
+                '> 4. Re-run this check to verify remediation'
+              ].join('\n');
+
+              // Ensure comment doesn't exceed GitHub's limit
+              const finalComment = commentBody.length > 65000 
+                ? commentBody.substring(0, 65000) + '\n\n> ... (comment truncated due to length)'
+                : commentBody;
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: finalComment
+              });
+
+              console.log(`🚨 Posted comment about ${lines.length} potential secrets`);
+            } else {
+              console.log('✅ No verified secrets to report');
+            }
+
+      - name: Upload TruffleHog results
+        if: steps.check-results.outputs.results-exist == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog-results
+          path: trufflehog-results.json
+          retention-days: 30
+
+      - name: Fail workflow if secrets detected and fail-on-secrets is true
+        if: steps.check-results.outputs.results-exist == 'true' && inputs.fail-on-secrets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'trufflehog-results.json';
+
+            if (!fs.existsSync(path)) return;
+
+            const fileContent = fs.readFileSync(path, 'utf8').trim();
+            if (!fileContent) return;
+
+            const secretCount = fileContent.split('\n').filter(Boolean).length;
+            
+            if (secretCount > 0) {
+              core.setFailed(`🚨 ${secretCount} potential secret${secretCount > 1 ? 's' : ''} detected in this PR. Please rotate and remove exposed secrets before merging.`);
+            }
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🔍 TruffleHog Secret Scan Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "trufflehog-results.json" ]; then
+            SECRET_COUNT=$(cat trufflehog-results.json | grep -c '.' || echo "0")
+            if [ "$SECRET_COUNT" -gt 0 ]; then
+              echo "❌ **Status**: $SECRET_COUNT potential secret(s) detected" >> $GITHUB_STEP_SUMMARY
+              echo "📋 **Action Required**: Review and remediate detected secrets" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **Status**: No secrets detected" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ **Status**: No secrets detected" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration**:" >> $GITHUB_STEP_SUMMARY
+          echo "- Base ref: ${{ inputs.base-ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Head ref: ${{ inputs.head-ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Fail on secrets: ${{ inputs.fail-on-secrets }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Scan depth: ${{ inputs.scan-depth }}" >> $GITHUB_STEP_SUMMARY

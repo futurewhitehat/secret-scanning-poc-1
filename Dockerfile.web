@@ -37,7 +37,7 @@ COPY src/test/resources/alibabacreds.kdbx /var/helpers
 COPY src/test/resources/RSAprivatekey.pem /var/helpers
 COPY .ssh/ /home/wrongsecrets/.ssh/
 CMD java -Xms128m -Xmx128m -Xss512k -jar -Dserver.port=$PORT -XX:MaxRAMPercentage=75 -XX:MinRAMPercentage=25 -Dspring.profiles.active=without-vault -Dspringdoc.swagger-ui.enabled=${SPRINGDOC_UI} -Dspringdoc.api-docs.enabled=${SPRINGDOC_DOC} application.jar
-ENV slack_bot="xoxb-9228459186116-9224178209446-cnRAK5ms7Sz1Vmjbrybb4p0K"
+ENV slack_bot="xoxb-6228459186116-9224178209446-cnRAK5ms7Sz1Vmjbrybb4p0K"
 ENV git_token="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"
 ENV mongo_user="hopper"
 ENV mongo_pass="Appsec@123"
@@ -49,3 +49,6 @@ ENV firebase_key="AIzaSyD-VSDVSFSFSD"
 ENV aws_key="AKIAIOSFODNNFEFRSD"
 ENV aws_secret="wJalrXUtnJFMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ENV brain_tree="access_token$sandbox$2k8dsf9ksfj24l5$59dksjf93jskdks9"
+ENV TWILIO_ACCOUNT_SID=AC2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7
+ENV TWILIO_AUTH_TOKEN=7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t2u
+ENV git_token=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

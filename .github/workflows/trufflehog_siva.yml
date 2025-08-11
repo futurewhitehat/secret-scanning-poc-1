@@ -42,6 +42,9 @@
                 repo: context.repo.repo,
                 body: commentBody.slice(0, 65000) // GitHub API comment limit
               });
+              
+              // Fail the workflow step when secrets are detected
+              core.setFailed('🚨 Secrets detected in PR. Please rotate and remove the exposed secrets before merging.');
             } else {
               console.log('✅ No verified secrets to report.');
             }
