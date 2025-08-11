@@ -38,9 +38,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog v3.64.5
+      - name: Run TruffleHog v3.63.7
         id: scan
-        uses: trufflesecurity/trufflehog@v3.64.5
+        uses: trufflesecurity/trufflehog@v3.63.7
         with:
           path: .
           base: ${{ inputs.base-ref }}
