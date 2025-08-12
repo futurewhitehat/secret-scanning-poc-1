@@ -39,7 +39,6 @@ jobs:
           path: ./
           base: ${{ inputs.base-ref }}
           head: ${{ inputs.head-ref }}
-          token: ${{ secrets.GH_TOKEN }}
           extra_args: --only-verified --json
 
       - name: Save results
