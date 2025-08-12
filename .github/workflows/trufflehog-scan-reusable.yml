@@ -33,9 +33,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install TruffleHog CLI
+      - name: Download TruffleHog CLI
         run: |
-          pip install trufflehog==3.90.3
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
 
       - name: Run TruffleHog and save results
         id: scan
