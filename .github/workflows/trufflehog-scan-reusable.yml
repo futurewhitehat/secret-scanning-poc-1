@@ -44,8 +44,7 @@ jobs:
         id: scan
         run: |
           echo "🔍 Running TruffleHog from ${{ inputs.base-ref }} to ${{ inputs.head-ref }}"
-          trufflehog git \
-            --path ./ \
+          trufflehog git ./ \
             --base ${{ inputs.base-ref }} \
             --head ${{ inputs.head-ref }} \
             --json > trufflehog-results.json || true
