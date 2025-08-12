@@ -26,39 +26,57 @@ permissions:
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog
-        id: scan
-        uses: trufflesecurity/trufflehog@v3.90.3  # Example valid version
-        with:
-          path: ./
-          base: ${{ inputs.base-ref }}
-          head: ${{ inputs.head-ref }}
-          extra_args: --json
+      - name: Install TruffleHog CLI
+        run: |
+          pip install trufflehog==3.90.3
 
-      - name: Save results
-        run: echo "${{ steps.scan.outputs.results }}" > trufflehog-results.json
+      - name: Run TruffleHog and save results
+        id: scan
+        run: |
+          echo "🔍 Running TruffleHog from ${{ inputs.base-ref }} to ${{ inputs.head-ref }}"
+          trufflehog git \
+            --path ./ \
+            --base ${{ inputs.base-ref }} \
+            --head ${{ inputs.head-ref }} \
+            --json > trufflehog-results.json || true
+
+      - name: Show results (for debugging)
+        run: cat trufflehog-results.json || echo "No results found"
 
       - name: Comment on PR if secrets are found
-        if: inputs.is-pr == true && steps.scan.outputs.results != ''
+        if: inputs.is-pr == true && (success() || failure())
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const findings = require('fs').readFileSync('trufflehog-results.json', 'utf8');
-            const safe = findings.slice(0, 65000);
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `🚨 **TruffleHog detected potential secrets:**\n\n\`\`\`json\n${safe}\n\`\`\``
-            });
+            const fs = require('fs');
+            const findings = fs.existsSync('trufflehog-results.json') 
+              ? fs.readFileSync('trufflehog-results.json', 'utf8') 
+              : '';
 
-      - name: Fail on secrets
-        if: steps.scan.outputs.results != ''
-        run: exit 1
+            if (findings.trim().length > 0) {
+              const safe = findings.slice(0, 65000);
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `🚨 **TruffleHog detected potential secrets:**\n\n\`\`\`json\n${safe}\n\`\`\``
+              });
+            }
+
+      - name: Fail if secrets are found
+        if: success() || failure()
+        run: |
+          if [ -s trufflehog-results.json ]; then
+            echo "❌ Secrets found. Failing the job."
+            exit 1
+          else
+            echo "✅ No secrets found."
+          fi
