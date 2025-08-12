@@ -45,8 +45,7 @@ jobs:
         run: |
           echo "🔍 Running TruffleHog from ${{ inputs.base-ref }} to ${{ inputs.head-ref }}"
           trufflehog git ./ \
-            --base ${{ inputs.base-ref }} \
-            --head ${{ inputs.head-ref }} \
+            --since-commit ${{ inputs.base-ref }} \
             --json > trufflehog-results.json || true
 
       - name: Show results (for debugging)
