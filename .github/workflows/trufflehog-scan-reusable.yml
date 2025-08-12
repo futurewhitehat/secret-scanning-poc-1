@@ -3,6 +3,9 @@ name: Reusable TruffleHog Workflow
 on:
   workflow_call:
     inputs:
+      repo-uri:
+        required: true
+        type: string
       base-ref:
         required: false
         type: string
@@ -44,7 +47,7 @@ jobs:
         id: scan
         run: |
           echo "🔍 Running TruffleHog from ${{ inputs.base-ref }} to ${{ inputs.head-ref }}"
-          trufflehog git . \
+          trufflehog git ${{ inputs.repo-uri }} \
             --since-commit ${{ inputs.base-ref }} \
             --json > trufflehog-results.json || true
 
