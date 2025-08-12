@@ -35,7 +35,8 @@ jobs:
 
       - name: Download TruffleHog CLI
         run: |
-          curl -L https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64 -o trufflehog
+          curl -L https://github.com/trufflesecurity/trufflehog/releases/download/v3.90.3/trufflehog_3.90.3_linux_amd64.tar.gz -o trufflehog.tar.gz
+          tar -xzvf trufflehog.tar.gz
           chmod +x trufflehog
           sudo mv trufflehog /usr/local/bin/
 
